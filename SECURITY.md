@@ -2,7 +2,7 @@
 
 ## Trust boundary
 
-Local Agents MCP is intended for one trusted user, with Paseo and the gateway on the same Mac. Authorizing an OAuth client grants meaningful local agent read/write authority. It is not suitable as a shared public service for untrusted tenants.
+Dot GPT Local Agents MCP is intended for one trusted user, with Paseo and the gateway on the same Mac. Authorizing an OAuth client grants meaningful local agent read/write authority. It is not suitable as a shared public service for untrusted tenants.
 
 `allowedRoots` resolves real paths and rejects out-of-scope targets and symlink escapes. It is a gateway path check, not an OS sandbox: an agent can execute commands using its own runtime permissions. Generic agent reads, cancellation, updates and permission responses use the shared allowed-root authority domain. Client ownership additionally isolates collaboration request records, messages, subscriptions and reply claims, not every agent operation.
 

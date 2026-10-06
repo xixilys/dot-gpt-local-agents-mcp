@@ -1,6 +1,6 @@
-# Local Agents MCP
+# Dot GPT Local Agents MCP
 
-An OAuth-protected MCP gateway for **Paseo agents on your Mac**. A compatible ChatGPT/dot client can discover workspaces, dispatch Codex, Claude Code or OpenCode tasks, recover exact request results, and subscribe to agent messages and attention events.
+Let **dot and GPT** dispatch and manage **local Paseo agents** through an OAuth-protected MCP gateway on your Mac. Compatible clients can discover workspaces, dispatch Codex, Claude Code or OpenCode tasks, recover exact request results, and subscribe to agent messages and attention events.
 
 This is a self-hosted, single-user tool. It reuses your installed Paseo and its provider authentication. It does not provide model accounts, a hosted gateway, or an OS sandbox.
 
@@ -17,8 +17,8 @@ The legacy tools transport and the `2026-07-28` MCP Events adapter share `/mcp`.
 ## Install
 
 ```sh
-git clone https://github.com/xixilys/local-agents-mcp.git
-cd local-agents-mcp
+git clone https://github.com/xixilys/dot-gpt-local-agents-mcp.git
+cd dot-gpt-local-agents-mcp
 npm ci --ignore-scripts
 npm_config_build_from_source=true npm rebuild better-sqlite3
 cp config.example.json config.json

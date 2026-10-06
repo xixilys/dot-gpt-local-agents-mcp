@@ -1,5 +1,5 @@
 {
-  "name": "local-agents-mcp",
+  "name": "dot-gpt-local-agents-mcp",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -21,10 +21,10 @@
   },
   "license": "MIT",
   "author": "xixilys",
-  "description": "OAuth MCP gateway for local Paseo agents with durable dispatch, results and scoped Events.",
+  "description": "Let dot and GPT dispatch and manage local Paseo agents through an OAuth-protected MCP gateway.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xixilys/local-agents-mcp.git"
+    "url": "https://github.com/xixilys/dot-gpt-local-agents-mcp.git"
   },
   "engines": {
     "node": ">=22.19 <27"
