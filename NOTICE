@@ -1,0 +1,32 @@
+Local Agents MCP
+Copyright (c) 2026 xixilys
+
+Original project code and documentation: MIT (see LICENSE).
+
+The test fixture test/fixtures/paseo-tools.json is derived from Paseo's
+MCP tool catalog, version 0.10.3, and remains under Apache-2.0.
+Copyright (c) 2025-present Mohamed Boudra.
+Source: https://github.com/getpaseo/paseo/tree/v0.10.3
+License: third_party/paseo-LICENSE (unmodified upstream license).
+No upstream NOTICE file is present at the v0.10.3 repository root.
+This fixture contains interface schemas/descriptions, not user task data.
+
+The gateway loads the user's installed Paseo client at runtime; it does
+not distribute Paseo binaries or client source.
+
+Dependencies in package-lock.json are installed separately and retain
+their own copyright, license and notice files. Notable direct dependencies:
+  @waishnav/devspace 1.0.8 - MIT, Copyright (c) 2026 Waishnav
+  @modelcontextprotocol/sdk 1.29.0 - MIT
+  @modelcontextprotocol/node 2.1.1 - Apache-2.0
+  @modelcontextprotocol/server 2.3.0 - Apache-2.0
+  ajv 8.20.0 - MIT
+  express 5.2.1 - MIT
+  ipaddr.js 2.5.0 - MIT
+  standardwebhooks 1.1.1 - MIT
+  zod 4.6.5 - MIT
+
+Some transitive provider SDKs (including Anthropic's Claude agent SDK)
+use their suppliers' license/usage terms. Neither this project's MIT
+license nor this notice relicenses them. Review package license files
+and preserve applicable notices when distributing dependencies/binaries.

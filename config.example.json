@@ -1,0 +1,11 @@
+{
+  "publicBaseUrl": "https://gateway.example.com",
+  "port": 6768,
+  "upstreamUrl": "http://127.0.0.1:6767/mcp/agents",
+  "stateDir": "/absolute/path/to/home/.local/share/local-agents-mcp",
+  "ownerTokenFile": "/absolute/path/to/private/owner.json",
+  "paseoCommand": "/absolute/path/to/paseo",
+  "allowedRoots": [
+    "/absolute/path/to/allowed/project"
+  ]
+}

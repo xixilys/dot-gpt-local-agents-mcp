@@ -1,0 +1,32 @@
+{
+  "name": "local-agents-mcp",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/server": "2.3.0",
+    "@waishnav/devspace": "1.0.8",
+    "ajv": "8.20.0",
+    "express": "5.2.1",
+    "ipaddr.js": "2.5.0",
+    "standardwebhooks": "1.1.1",
+    "zod": "4.6.5"
+  },
+  "license": "MIT",
+  "author": "xixilys",
+  "description": "OAuth MCP gateway for local Paseo agents with durable dispatch, results and scoped Events.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xixilys/local-agents-mcp.git"
+  },
+  "engines": {
+    "node": ">=22.19 <27"
+  }
+}
