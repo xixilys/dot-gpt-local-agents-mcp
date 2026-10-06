@@ -20,6 +20,7 @@ import { Collaboration } from './collaboration.js';
 import { createAgentChannel } from './agent-channel.js';
 import { ObserverClient } from './observer-client.js';
 import { createModernHandler, isModernRequest } from './protocol-server.js';
+import { createRequestDiagnostics } from './request-diagnostics.js';
 
 export const SCOPE = 'local-agents';
 
@@ -126,18 +127,27 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
     if (typeof req.auth?.clientId !== 'string' || !req.auth.clientId.length) { res.sendStatus(401); return; }
     req.mcpOwner = `local-owner:${req.auth.clientId}`;
     if (isModernRequest(req)) { await modern(req, res, req.body); return; }
+    const observation = createRequestDiagnostics(req, res, { gateway });
     const server = new Server({ name: 'local-agents-mcp', version: '0.3.0' }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await gateway.refreshTools() }));
+    server.onerror = error => observation.report('protocol', error);
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
+      try { return { tools: await gateway.refreshTools() }; }
+      catch (error) { observation.report('handler', error); throw error; }
+    });
     server.setRequestHandler(CallToolRequestSchema, async request => {
       try { return await gateway.call(request.params.name, request.params.arguments ?? {}, { owner: req.mcpOwner }); }
-      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
+      catch (error) {
+        observation.report('tool', error);
+        return { isError: true, content: [{ type: 'text', text: typeof error?.message === 'string' ? error.message : 'Tool execution failed' }] };
+      }
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { void server.close().catch(() => {}); });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
-    } catch {
+    } catch (error) {
+      observation.report('transport', error);
       if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Gateway request failed' } });
       await server.close().catch(() => {});
     }

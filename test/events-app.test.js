@@ -92,6 +92,16 @@ test('same authenticated MCP endpoint runs modern events and legacy tools, route
   assert.equal(fetched.result.structuredContent.text, 'Actual bounded agent message.');
   const legacy = await rpc('tools/call', { name: 'get_dispatch_request', arguments: { requestId: 'app-create' } }, false);
   assert.equal(legacy.result.structuredContent.agentId, agentId);
+  const call = runtime.gateway.call;
+  let rejectedCalls = 0;
+  runtime.gateway.call = async () => { rejectedCalls++; throw undefined; };
+  try {
+    const rejected = await rpc('tools/call', { name: 'get_dispatch_request', arguments: { requestId: 'app-create' } }, false);
+    assert.equal(rejected.status, 200);
+    assert.equal(rejected.result.isError, true);
+    assert.equal(rejected.result.content[0].text, 'Tool execution failed');
+    assert.equal(rejectedCalls, 1);
+  } finally { runtime.gateway.call = call; }
   const otherClient = provider.clientsStore.registerClient({ client_name: 'other test', redirect_uris: ['http://127.0.0.1:9012/callback'], token_endpoint_auth_method: 'none', grant_types: ['authorization_code','refresh_token'], response_types: ['code'] });
   const other = provider.issueTokens(otherClient.client_id, [SCOPE], resource);
   const denied = await rpc('tools/call', { name: 'get_agent_message', arguments: { messageId } }, true, other.access_token);

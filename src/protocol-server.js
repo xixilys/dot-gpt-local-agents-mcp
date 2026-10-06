@@ -1,6 +1,8 @@
 import { createMcpHandler, Server, ProtocolError, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { z } from 'zod';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createRequestDiagnostics } from './request-diagnostics.js';
 
 export const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
@@ -45,36 +47,48 @@ function authenticatedOwner(owner) {
  * eventService owns event definitions, argument validation and authorization,
  * callback verification, persistence and delivery. Its methods return MCP results.
  */
-export function createModernHandler({ gateway, eventService, serverInfo = { name: 'local-agents-mcp', version: '0.1.0' } }) {
+export function createModernHandler({ gateway, eventService, serverInfo = { name: 'local-agents-mcp', version: '0.1.0' }, onDiagnostic }) {
+  const diagnostics = new AsyncLocalStorage();
+  const report = (stage, error) => diagnostics.getStore()?.report(stage, error);
+  const observed = callback => async (...args) => {
+    try { return await callback(...args); }
+    catch (error) { report('handler', error); throw error; }
+  };
   const handler = createMcpHandler(({ authInfo }) => {
     const server = new Server(serverInfo, { capabilities: { tools: {}, events: {} } });
-    server.setRequestHandler('tools/list', async () => ({ tools: await gateway.refreshTools() }));
+    server.onerror = error => report('protocol', error);
+    server.setRequestHandler('tools/list', observed(async () => ({ tools: await gateway.refreshTools() })));
     server.setRequestHandler('tools/call', async request => {
       try { return await gateway.call(request.params.name, request.params.arguments ?? {}, { owner: authenticatedOwner(authInfo?.mcpOwner) }); }
-      catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
+      catch (error) {
+        report('tool', error);
+        return { isError: true, content: [{ type: 'text', text: typeof error?.message === 'string' ? error.message : 'Tool execution failed' }] };
+      }
     });
-    server.setRequestHandler('events/list', { params: listParams }, async params => {
+    server.setRequestHandler('events/list', { params: listParams }, observed(async params => {
       const { _meta, ...businessParams } = params;
       return eventService.list(authenticatedOwner(authInfo?.mcpOwner), businessParams);
-    });
-    server.setRequestHandler('events/subscribe', { params: subscribeParams }, async params => {
+    }));
+    server.setRequestHandler('events/subscribe', { params: subscribeParams }, observed(async params => {
       const { _meta, ...businessParams } = params;
       return eventService.subscribe(authenticatedOwner(authInfo?.mcpOwner), businessParams);
-    });
-    server.setRequestHandler('events/unsubscribe', { params: unsubscribeParams }, async params => {
+    }));
+    server.setRequestHandler('events/unsubscribe', { params: unsubscribeParams }, observed(async params => {
       const { _meta, ...businessParams } = params;
       return eventService.unsubscribe(authenticatedOwner(authInfo?.mcpOwner), businessParams);
-    });
+    }));
     return server;
-  }, { legacy: 'reject' });
+  }, { legacy: 'reject', onerror: error => report('http_protocol', error) });
 
   const nodeHandler = async (req, res, parsedBody = req.body) => {
     // Each wrapper closes over this request's identity, including concurrent calls.
     // toNodeHandler passes authentication through without reading credential headers.
+    const observation = createRequestDiagnostics({ body: parsedBody === undefined || typeof parsedBody === 'function' ? req.body : parsedBody,
+      once: req.once.bind(req) }, res, { gateway, write: onDiagnostic });
     const adapter = toNodeHandler({ fetch: (request, options) => handler.fetch(request, {
       ...options, authInfo: { ...options?.authInfo, mcpOwner: req.mcpOwner },
-    }) });
-    await adapter(req, res, typeof parsedBody === 'function' ? req.body : parsedBody);
+    }) }, { onerror: error => observation.report('adapter', error) });
+    await diagnostics.run(observation, () => adapter(req, res, typeof parsedBody === 'function' ? req.body : parsedBody));
   };
   nodeHandler.close = () => handler.close();
   return nodeHandler;

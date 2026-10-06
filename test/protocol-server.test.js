@@ -13,7 +13,7 @@ const params = { name: event.name, arguments: { workspaceId: 'workspace-a' }, de
   mode: 'webhook', url: 'https://receiver.example/callback', secret: 'whsec_example',
 }, cursor: null };
 
-async function fixture(t, { owner = 'authenticated-owner', eventService, parsedBody = false } = {}) {
+async function fixture(t, { owner = 'authenticated-owner', eventService, parsedBody = false, gatewayOverride, onDiagnostic, badHost = false } = {}) {
   const calls = [];
   const gateway = {
     async refreshTools() { calls.push(['tools/list']); return [{ name: 'echo', inputSchema: { type: 'object' } }]; },
@@ -28,7 +28,8 @@ async function fixture(t, { owner = 'authenticated-owner', eventService, parsedB
     async subscribe(who, args) { calls.push(['events/subscribe', who, args]); return { id: 'sub_test', refreshBefore: null, cursor: null, truncated: false }; },
     async unsubscribe(who, args) { calls.push(['events/unsubscribe', who, args]); return {}; },
   };
-  const handler = createModernHandler({ gateway, eventService: events, serverInfo });
+  Object.assign(gateway, gatewayOverride);
+  const handler = createModernHandler({ gateway, eventService: events, serverInfo, onDiagnostic });
   const server = createServer(async (req, res) => {
     req.auth = { token: 'middleware-verified', clientId: 'rotating-oauth-client', scopes: ['local-agents'] };
     req.mcpOwner = typeof owner === 'function' ? owner(req) : owner;
@@ -37,12 +38,13 @@ async function fixture(t, { owner = 'authenticated-owner', eventService, parsedB
       for await (const chunk of req) chunks.push(chunk);
       req.body = JSON.parse(Buffer.concat(chunks).toString());
     }
+    if (badHost) req.headers.host = '[';
     void handler(req, res);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await handler.close(); await new Promise(resolve => server.close(resolve)); });
   const url = `http://127.0.0.1:${server.address().port}/mcp`;
-  async function request(method, businessParams = {}, { headers = {}, body, version = MODERN_PROTOCOL_VERSION, id = 7, path = '/mcp' } = {}) {
+  async function request(method, businessParams = {}, { headers = {}, body, version = MODERN_PROTOCOL_VERSION, id = 7, path = '/mcp', signal } = {}) {
     const message = body ?? { jsonrpc: '2.0', id, method, params: {
       ...businessParams, _meta: { [protocolKey]: version, [capabilitiesKey]: {} },
     } };
@@ -51,7 +53,7 @@ async function fixture(t, { owner = 'authenticated-owner', eventService, parsedB
     for (const [key, value] of Object.entries(headers)) {
       if (value === null) delete standardHeaders[key]; else standardHeaders[key] = value;
     }
-    const response = await fetch(new URL(path, url), { method: 'POST', headers: standardHeaders, body: typeof message === 'string' ? message : JSON.stringify(message) });
+    const response = await fetch(new URL(path, url), { method: 'POST', headers: standardHeaders, body: typeof message === 'string' ? message : JSON.stringify(message), signal });
     return { status: response.status, headers: response.headers, body: await response.json() };
   }
   return { request, calls, handler };
@@ -123,11 +125,92 @@ test('tools use the same gateway and modern complete/error result shapes', async
   ]);
 });
 
+test('a non-Error tool rejection stays one failed tool call instead of becoming -32603', async t => {
+  const records = []; let dispatched = 0;
+  const f = await fixture(t, { parsedBody: true, onDiagnostic: record => records.push(record),
+    gatewayOverride: { async call() { dispatched++; throw null; } } });
+  const response = await f.request('tools/call', { name: 'echo' });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.result.isError, true);
+  assert.equal(response.body.result.content[0].text, 'Tool execution failed');
+  assert.equal(dispatched, 1);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].stage, 'tool');
+  assert.equal(records[0].errorClass, 'NonError');
+  assert.equal(response.headers.get('x-local-agents-request-id'), records[0].correlationId);
+});
+
+test('handler failures retain RPC errors and safe diagnostics without logging caller data', async t => {
+  const records = [], canary = 'PRIVATE_TOKEN_CANARY';
+  const f = await fixture(t, { parsedBody: true, onDiagnostic: record => records.push(record),
+    gatewayOverride: { async refreshTools() { throw new Error(canary); } } });
+  const response = await f.request('tools/list', {}, { id: canary, path: '/mcp?token=' + canary,
+    headers: { authorization: 'Bearer ' + canary, 'x-local-agents-request-id': canary } });
+  assert.equal(response.body.error.code, -32603);
+  assert.equal(response.body.id, canary);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].stage, 'handler');
+  assert.equal(records[0].method, 'tools/list');
+  assert.equal(response.headers.get('x-local-agents-request-id'), records[0].correlationId);
+  assert.ok(!JSON.stringify(records).includes(canary));
+});
+
+test('adapter conversion errors are observable while preserving HTTP 500 and RPC identity', async t => {
+  const records = [];
+  const f = await fixture(t, { parsedBody: true, badHost: true, onDiagnostic: record => records.push(record) });
+  const response = await f.request('tools/list');
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error.code, -32603);
+  assert.equal(response.body.id, 7);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].stage, 'adapter');
+  assert.equal(response.headers.get('x-local-agents-request-id'), records[0].correlationId);
+});
+
+test('concurrent failures keep separate diagnostics and a broken logger cannot change results', async t => {
+  const records = [];
+  const f = await fixture(t, { parsedBody: true, onDiagnostic: record => records.push(record),
+    gatewayOverride: { async call(_name, args) { await new Promise(resolve => setTimeout(resolve, args.delay)); throw undefined; } } });
+  const responses = await Promise.all([f.request('tools/call', { name: 'echo', arguments: { delay: 20 } }),
+    f.request('tools/call', { name: 'echo', arguments: { delay: 1 } })]);
+  assert.equal(new Set(records.map(record => record.correlationId)).size, 2);
+  for (const response of responses) {
+    assert.equal(response.body.result.isError, true);
+    assert.ok(records.some(record => record.correlationId === response.headers.get('x-local-agents-request-id')));
+  }
+  const broken = await fixture(t, { parsedBody: true, onDiagnostic() { throw new Error('logger unavailable'); },
+    gatewayOverride: { async call() { throw null; } } });
+  const response = await broken.request('tools/call', { name: 'echo' });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.result.isError, true);
+});
+
+test('a real client disconnect records one incomplete transport without repeating the tool call', async t => {
+  const records = []; let dispatched = 0, entered, release, closed;
+  const enteredCall = new Promise(resolve => { entered = resolve; });
+  const continueCall = new Promise(resolve => { release = resolve; });
+  const transportClosed = new Promise(resolve => { closed = resolve; });
+  const f = await fixture(t, { parsedBody: true, onDiagnostic(record) {
+    records.push(record); if (record.stage === 'response_transport' || record.stage === 'request_transport') closed();
+  }, gatewayOverride: { async call() { dispatched++; entered(); await continueCall; return { content: [{ type: 'text', text: 'ok' }] }; } } });
+  const controller = new AbortController();
+  const pending = f.request('tools/call', { name: 'echo' }, { signal: controller.signal });
+  await enteredCall;
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  await transportClosed;
+  release();
+  assert.equal(dispatched, 1);
+  assert.equal(records.filter(record => record.stage.endsWith('_transport')).length, 1);
+});
+
 test('unsupported revision and header/body mismatches fail before gateway dispatch', async t => {
-  const f = await fixture(t);
+  const records = [];
+  const f = await fixture(t, { onDiagnostic: record => records.push(record) });
   const version = await f.request('tools/list', {}, { version: '2026-12-01' });
   assert.equal(version.status, 400);
   assert.equal(version.body.error.code, -32022);
+  assert.ok(records.some(record => record.stage === 'http_protocol' && record.code === -32022));
   for (const headers of [
     { 'mcp-protocol-version': '2025-11-25' },
     { 'mcp-method': 'events/list' },
