@@ -28,5 +28,10 @@
   },
   "engines": {
     "node": ">=22.19 <27"
+  },
+  "overrides": {
+    "@waishnav/devspace": {
+      "better-sqlite3": "13.0.3"
+    }
   }
 }

@@ -33,7 +33,6 @@ The example below is a shape guide for the 0.4.0 multi-host configuration. Repla
 git clone https://github.com/xixilys/dot-gpt-local-agents-mcp.git
 cd dot-gpt-local-agents-mcp
 npm ci --ignore-scripts
-npm_config_build_from_source=true npm rebuild better-sqlite3
 cp config.example.json config.json
 ```
 
@@ -55,15 +54,15 @@ Configure one OAuth gateway and your hosts. Keep the existing Mac settings as to
       "transport": "ssh",
       "target": "ssh://linux-host",
       "allowedRoots": ["/home/you/project"],
-      "remoteStateDir": "/home/you/.local/share/local-agents-mcp-bridge/gateway"
+      "remoteStateDir": "/home/you/.local-agents-mcp-bridge/gateway"
     }
   ]
 }
 ```
 
-Create the private owner-password file in the Mac state directory before starting the service. Keep the password and state outside source control. The gateway process and local Paseo instance must run as the same Mac user. Each remote host must already have Paseo installed and running, and the configured SSH identity must be able to reach it using your normal OpenSSH authentication setup. Remote `allowedRoots` are checked on the remote host after resolving canonical paths; this is a path policy, not an OS sandbox.
+Create the private owner-password file in the Mac state directory before starting the service. Keep the password and state outside source control. The gateway process and local Paseo instance must run as the same Mac user. Each remote host must already have Paseo installed and running, and the configured SSH identity must be able to reach it using your normal OpenSSH authentication setup. Remote `allowedRoots` are checked on the remote host after resolving canonical paths; this is a path policy, not an OS sandbox. Choose `remoteStateDir` and its parent with permissions that pass the bridge's private-directory checks; existing directories are not automatically made private.
 
-On macOS, the local Paseo observer helpers use the app's Electron runtime and bundled client. The original supported setup is Paseo **0.10.3** at `/Applications/Paseo.app`; other versions or installation paths need verification. The gateway requires Node.js `>=22.19 <27`, npm, and the native `better-sqlite3` module. Building that locked module needs a C/C++ toolchain, Python, and official Node headers. Other dependency lifecycle scripts remain disabled by `npm ci --ignore-scripts`.
+On macOS, the local Paseo observer helpers use the app's Electron runtime and bundled client. The original supported setup is Paseo **0.10.3** at `/Applications/Paseo.app`; other versions or installation paths need verification. The gateway requires Node.js `>=22.19 <27`, npm, and `better-sqlite3` **13.0.3**, which ships Node-API prebuilt binaries. `npm ci --ignore-scripts` keeps dependency lifecycle scripts disabled; supported prebuilt platforms need no manual native rebuild. Unsupported platforms or an intentional source build may require a C/C++ toolchain, Python, and official Node headers.
 
 ```sh
 npm run check
@@ -156,11 +155,10 @@ The public source snapshot excludes production configuration, runtime databases,
 
 ```sh
 npm ci --ignore-scripts
-npm_config_build_from_source=true npm rebuild better-sqlite3
 npm run check
 npm test
 ```
 
-CI runs syntax checks and the repository's behavior/security tests on Node.js 22.19 and 24. A green host availability result confirms that a configured Paseo daemon responds; it does not certify every task, message, or event flow. Verify the client and workflows you rely on in your deployment environment.
+The scoped override pins `@waishnav/devspace`'s SQLite dependency to `better-sqlite3` 13.0.3 and its Node-API prebuilds, avoiding an unnecessary source rebuild on supported platforms; see the [official 13.0.0 release notes](https://github.com/WiseLibs/better-sqlite3/releases/tag/v13.0.0). CI runs syntax checks and the repository's behavior/security tests on Node.js 22.19 and 24. A green host availability result confirms that a configured Paseo daemon responds; it does not certify every task, message, or event flow. Verify the client and workflows you rely on in your deployment environment.
 
 Original project code and documentation, except the Apache-marked Direct modules and tests, are licensed under [MIT](LICENSE), Copyright (c) 2026 xixilys. The modified Node modules in `src/direct-*` and Direct tests with Apache SPDX headers are adapted from Codex Bridge Direct at [revision `f881877`](https://github.com/Fanch-hui/codex-bridge/tree/f881877183bb1f5d355124caf6b86cb7f2323e53) and are licensed under Apache-2.0; see [NOTICE](NOTICE) and [third_party/codex-bridge-LICENSE](third_party/codex-bridge-LICENSE). The Paseo schema fixture is also Apache-2.0; its license is at [third_party/paseo-LICENSE](third_party/paseo-LICENSE). Dependencies and Paseo binaries are not bundled and retain their own licenses and terms.

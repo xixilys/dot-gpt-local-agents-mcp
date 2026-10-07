@@ -33,7 +33,6 @@
 git clone https://github.com/xixilys/dot-gpt-local-agents-mcp.git
 cd dot-gpt-local-agents-mcp
 npm ci --ignore-scripts
-npm_config_build_from_source=true npm rebuild better-sqlite3
 cp config.example.json config.json
 ```
 
@@ -55,15 +54,15 @@ cp config.example.json config.json
       "transport": "ssh",
       "target": "ssh://linux-host",
       "allowedRoots": ["/home/you/project"],
-      "remoteStateDir": "/home/you/.local/share/local-agents-mcp-bridge/gateway"
+      "remoteStateDir": "/home/you/.local-agents-mcp-bridge/gateway"
     }
   ]
 }
 ```
 
-启动服务前，先在 Mac 的状态目录中创建私有 owner 密码文件。密码和状态目录应放在源码仓库之外。网关进程与本机 Paseo 应由同一个 Mac 用户运行。每台远端主机都必须已安装并运行 Paseo；SSH 身份须能通过你现有的 OpenSSH 认证配置访问它。远端 `allowedRoots` 会在远端解析规范路径后检查；这是路径策略，不是操作系统沙箱。
+启动服务前，先在 Mac 的状态目录中创建私有 owner 密码文件。密码和状态目录应放在源码仓库之外。网关进程与本机 Paseo 应由同一个 Mac 用户运行。每台远端主机都必须已安装并运行 Paseo；SSH 身份须能通过你现有的 OpenSSH 认证配置访问它。远端 `allowedRoots` 会在远端解析规范路径后检查；这是路径策略，不是操作系统沙箱。请为 `remoteStateDir` 及其父目录选择能通过 bridge 私有目录检查的权限；已有目录不会被自动改成私有权限。
 
-Mac 上的 Paseo observer helper 使用应用自带的 Electron runtime 和客户端。原有支持配置为 Paseo **0.10.3**，安装位置是 `/Applications/Paseo.app`；其他版本或路径仍需验证。网关要求 Node.js `>=22.19 <27`、npm 和原生 `better-sqlite3` 模块。构建这个锁定版本的模块需要 C/C++ 工具链、Python 和官方 Node headers。执行 `npm ci --ignore-scripts` 时不会运行其他依赖的 lifecycle scripts。
+Mac 上的 Paseo observer helper 使用应用自带的 Electron runtime 和客户端。原有支持配置为 Paseo **0.10.3**，安装位置是 `/Applications/Paseo.app`；其他版本或路径仍需验证。网关要求 Node.js `>=22.19 <27`、npm 和 `better-sqlite3` **13.0.3**，该版本提供 Node-API 预构建二进制。`npm ci --ignore-scripts` 会继续禁用依赖 lifecycle scripts；支持预构建包的平台无需手动编译原生模块。未提供预构建包的平台或主动选择源码编译时，可能需要 C/C++ 工具链、Python 和官方 Node headers。
 
 ```sh
 npm run check
@@ -156,11 +155,10 @@ Mac 和远端 `allowedRoots` 检查都会解析规范路径，并拒绝越界目
 
 ```sh
 npm ci --ignore-scripts
-npm_config_build_from_source=true npm rebuild better-sqlite3
 npm run check
 npm test
 ```
 
-CI 使用 Node.js 22.19 和 24 运行语法检查及仓库中的行为/安全测试。主机状态显示可用，表示配置的 Paseo daemon 有响应；这不能证明所有任务、消息或事件流程都正常。请在自己的部署环境中验证实际使用的客户端和工作流。
+项目使用 scoped override，将 `@waishnav/devspace` 下的 SQLite 依赖固定到 `better-sqlite3` 13.0.3 及其 Node-API 预构建包，支持平台无需额外源码编译；详见 [13.0.0 官方发布说明](https://github.com/WiseLibs/better-sqlite3/releases/tag/v13.0.0)。CI 使用 Node.js 22.19 和 24 运行语法检查及仓库中的行为/安全测试。主机状态显示可用，表示配置的 Paseo daemon 有响应；这不能证明所有任务、消息或事件流程都正常。请在自己的部署环境中验证实际使用的客户端和工作流。
 
 除带 Apache 标记的 Direct 模块与测试外，项目原始代码和文档采用 [MIT](LICENSE) 许可，版权归 xixilys 所有，年份为 2026。`src/direct-*` 中经过修改的 Node 模块及带 Apache SPDX 标记的 Direct 测试源自 Codex Bridge Direct 的 [revision `f881877`](https://github.com/Fanch-hui/codex-bridge/tree/f881877183bb1f5d355124caf6b86cb7f2323e53)，采用 Apache-2.0 许可；详见 [NOTICE](NOTICE) 和 [third_party/codex-bridge-LICENSE](third_party/codex-bridge-LICENSE)。Paseo schema fixture 也采用 Apache-2.0，许可文本见 [third_party/paseo-LICENSE](third_party/paseo-LICENSE)。此处不附带依赖或 Paseo 二进制文件；它们各自遵循其许可与使用条款。

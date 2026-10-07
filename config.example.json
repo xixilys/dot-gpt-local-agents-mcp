@@ -17,7 +17,7 @@
       "allowedRoots": [
         "/home/you/project"
       ],
-      "remoteStateDir": "/home/you/.local/share/local-agents-mcp-bridge/gateway",
+      "remoteStateDir": "/home/you/.local-agents-mcp-bridge/gateway",
       "direct": {
         "projects": [
           {

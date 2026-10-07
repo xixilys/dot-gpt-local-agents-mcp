@@ -17,6 +17,5 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm_config_build_from_source=true npm rebuild better-sqlite3
       - run: npm run check
       - run: npm test
