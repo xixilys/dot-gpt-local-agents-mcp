@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
@@ -20,7 +21,7 @@ const file = { download_url: 'https://owned-fixture.example/payload', file_id: '
 // Only the outbound source is replaced: fixtures write a bounded private spool.
 // All subsequent local/remote runtime operations, receipts, MCP and HTTP are real.
 async function fixture(t, { payload = Buffer.from('fixture\0bytes'), binaryTransportFactory, lifecycle } = {}) {
-  const dir = await fs.realpath(await fs.mkdtemp('/private/tmp/fti-'));
+  const dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'fti-')));
   const stateDir = join(dir, 's');
   const paths = { mac: join(dir, 'mac'), other: join(dir, 'other') };
   await Promise.all(Object.values(paths).map(path => fs.mkdir(path)));
@@ -243,7 +244,7 @@ test('independent full server: queued import revocation settles while shared tex
 });
 
 test('independent revocation revision: pre-registration calls stop only for revoked owner and host', async t => {
-  const dir = await fs.realpath(await fs.mkdtemp('/private/tmp/ftr-'));
+  const dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'ftr-')));
   const project = join(dir, 'p'); await fs.mkdir(project); await fs.writeFile(join(project, 'source'), 'owner-host-scope');
   const contexts = ['mac', 'other'].map(id => {
     const host = { id, transport: 'local', allowedRoots: [project], direct: { projects: [{ id: 'same', path: project, read: true, write: true }] } };
@@ -266,7 +267,7 @@ test('independent revocation revision: pre-registration calls stop only for revo
 });
 
 test('independent real transport capability expiry: expired URLs cannot serve bytes or reexecute request', async t => {
-  const dir = await fs.realpath(await fs.mkdtemp('/private/tmp/fte-')); const project = join(dir, 'p'); await fs.mkdir(project);
+  const dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'fte-'))); const project = join(dir, 'p'); await fs.mkdir(project);
   const host = { id: 'mac', transport: 'local', allowedRoots: [project], direct: { projects: [{ id: 'same', path: project, read: true, write: true }] } };
   const directFiles = new DirectFiles({ host }); let now = Date.now(); let exports = 0;
   const manager = new DirectTransfers({ contexts: [{ host, directFiles }], stateDir: join(dir, 's'), publicBaseUrl: 'https://gateway.example', now: () => now,
