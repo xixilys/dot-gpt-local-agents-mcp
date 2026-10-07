@@ -61,7 +61,12 @@ test('same authenticated MCP endpoint runs modern events and legacy tools, route
   }
   assert.equal((await rpc('server/discover')).result.capabilities.events instanceof Object, true);
   const catalog = (await rpc('tools/list')).result.tools;
-  assert.equal(catalog.length, 23);
+  assert.equal(catalog.length, 34);
+  assert.ok(catalog.some(tool => tool.name === 'list_direct_projects'));
+  assert.ok(catalog.some(tool => tool.name === 'run_direct_command'));
+  assert.ok(catalog.some(tool => tool.name === 'edit_direct_file'));
+  assert.ok(catalog.some(tool => tool.name === 'list_hosts'));
+  assert.deepEqual(catalog.find(tool => tool.name === 'create_agent').inputSchema.properties.hostId.enum, ['mac']);
   assert.ok(catalog.some(tool => tool.name === 'get_request_result'));
   assert.equal((await rpc('events/list')).result.events[0].name, ATTENTION_EVENT);
   const created = await rpc('tools/call', { name: 'create_agent', arguments: { requestId: 'app-create',

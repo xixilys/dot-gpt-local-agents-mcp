@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { StringDecoder } from 'node:string_decoder';
 import Ajv from 'ajv';
+import { validateSshTarget, nativeTarget } from './ssh-bridge.mjs';
 
 const HELPER = '/Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper';
 const SCRIPT = fileURLToPath(new URL('./agent-observer.mjs', import.meta.url));
@@ -30,12 +31,14 @@ const validate = new Ajv({ allErrors: false }).compile({ oneOf: [
 export class ObserverClient {
   constructor({ onEvent = () => {}, onStatus = () => {}, spawnImpl = spawn,
     backoffMs = 500, maxBackoffMs = 30000, maxLineBytes = 32768,
-    startupTimeoutMs = 10000, killTimeoutMs = 1000 } = {}) {
+    startupTimeoutMs = 10000, killTimeoutMs = 1000, target, expectedServerId } = {}) {
     for (const n of [backoffMs, maxBackoffMs, maxLineBytes, startupTimeoutMs, killTimeoutMs]) {
       if (!Number.isSafeInteger(n) || n < 1) throw new Error('Invalid observer limits');
     }
     if (maxLineBytes > 65536 || maxBackoffMs < backoffMs) throw new Error('Invalid observer limits');
     Object.assign(this, { onEvent, onStatus, spawnImpl, backoffMs, maxBackoffMs, maxLineBytes, startupTimeoutMs, killTimeoutMs });
+    this.target = target === undefined ? undefined : validateSshTarget(target).uri;
+    this.expectedServerId = expectedServerId;
     this.agentIds = new Set(); this.generation = 0; this.attempt = 0;
     this.started = false; this.closed = false; this.owner = null; this.retryTimer = null;
   }
@@ -52,7 +55,9 @@ export class ObserverClient {
       if (ids.length === 256 || typeof value !== 'string' || !UUID.test(value)) throw new Error('Invalid observer agent IDs');
       ids.push(value.toLowerCase());
     }
-    this.agentIds = new Set(ids);
+    const next = new Set(ids);
+    if (next.size === this.agentIds.size && [...next].every(id => this.agentIds.has(id))) return this;
+    this.agentIds = next;
     if (this.owner?.connected) this.sendWatch(this.owner);
     return this;
   }
@@ -73,7 +78,15 @@ export class ObserverClient {
       const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', PASEO_NODE_ENV: 'production' };
       // These child identity variables belong to an actual agent, not this observer.
       delete env.PASEO_AGENT_ID; delete env.PASEO_AGENT_CWD;
-      child = this.spawnImpl(HELPER, [SCRIPT], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      delete env.PASEO_PASSWORD; delete env.PASEO_HOST;
+      let transport;
+      if (this.target) {
+        const serverId = typeof this.expectedServerId === 'function' ? this.expectedServerId() : this.expectedServerId;
+        if (!serverId) throw new Error('Remote daemon identity must be established before observing');
+        transport = { target: this.target, serverId };
+        nativeTarget(transport);
+      }
+      child = this.spawnImpl(HELPER, [SCRIPT, ...(transport ? [JSON.stringify(transport)] : [])], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch { this.schedule('spawn_failed'); return; }
     const owner = { child, generation: this.generation, decoder: new StringDecoder('utf8'), input: '', connected: false, failed: false };
     this.owner = owner;

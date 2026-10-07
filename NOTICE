@@ -1,7 +1,8 @@
 Dot GPT Local Agents MCP
 Copyright (c) 2026 xixilys
 
-Original project code and documentation: MIT (see LICENSE).
+Original project code and documentation: MIT (see LICENSE), except the
+Direct modules identified below.
 
 The test fixture test/fixtures/paseo-tools.json is derived from Paseo's
 MCP tool catalog, version 0.10.3, and remains under Apache-2.0.
@@ -30,3 +31,16 @@ Some transitive provider SDKs (including Anthropic's Claude agent SDK)
 use their suppliers' license/usage terms. Neither this project's MIT
 license nor this notice relicenses them. Review package license files
 and preserve applicable notices when distributing dependencies/binaries.
+
+Direct Workspace interfaces and expected-hash/session concepts are adapted
+from Codex Bridge, Copyright 2026 Codex Bridge contributors, Apache-2.0.
+Source: https://github.com/Fanch-hui/codex-bridge
+Reference revision: f881877183bb1f5d355124caf6b86cb7f2323e53
+The Node Direct modules (src/direct-*) and Direct test files with Apache
+SPDX headers are modified adaptations under
+Apache-2.0: host routing, explicit project permissions, bounded UTF-8 I/O,
+registered commands, gateway-owned workers and durable request receipts.
+License: third_party/codex-bridge-LICENSE (unmodified upstream license).
+Codex Bridge's Swift runtime, tunnel, SwiftLog and SwiftNIO dependencies
+are not distributed or required by this gateway. This is not a claim of
+complete Codex Bridge protocol compatibility.

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Dot GPT Local Agents MCP</title>
+  <desc id="desc">One OAuth-protected gateway for Paseo agents on Mac and SSH hosts.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07182d"/>
+      <stop offset="1" stop-color="#123c55"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
+      <path d="M38 0H0V38" fill="none" stroke="#a5f3fc" stroke-opacity=".055"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="300" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="300" rx="28" fill="url(#grid)"/>
+  <circle cx="1075" cy="-10" r="230" fill="#2dd4bf" opacity=".06"/>
+  <circle cx="1120" cy="250" r="180" fill="#60a5fa" opacity=".07"/>
+  <path d="M815 80h175m-175 0 42-42m-42 42 42 42M815 220h175m-175 0 42-42m-42 42 42 42" fill="none" stroke="url(#accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+  <rect x="1002" y="53" width="124" height="54" rx="13" fill="#0b2136" stroke="#67e8f9" stroke-opacity=".7"/>
+  <rect x="1002" y="193" width="124" height="54" rx="13" fill="#0b2136" stroke="#60a5fa" stroke-opacity=".7"/>
+  <circle cx="1022" cy="80" r="5" fill="#5eead4"/>
+  <circle cx="1022" cy="220" r="5" fill="#60a5fa"/>
+  <text x="1040" y="86" fill="#e2f7f7" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="18" font-weight="650">Mac</text>
+  <text x="1040" y="226" fill="#e2efff" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="18" font-weight="650">SSH host</text>
+  <rect x="844" y="122" width="126" height="56" rx="15" fill="#102d43" stroke="url(#accent)" stroke-width="2"/>
+  <circle cx="868" cy="150" r="7" fill="#5eead4"/>
+  <text x="884" y="155" fill="#effafa" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" font-weight="700">MCP</text>
+  <text x="72" y="91" fill="#99f6e4" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="14" font-weight="750" letter-spacing="3">DOT  ×  PASEO</text>
+  <text x="68" y="151" fill="#f1f8ff" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="38" font-weight="750">Local Agents MCP</text>
+  <rect x="72" y="178" width="94" height="4" rx="2" fill="url(#accent)"/>
+  <text x="72" y="220" fill="#bdd3e5" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="19">One gateway. Multiple hosts. Clear ownership.</text>
+  <text x="72" y="255" fill="#86a6bd" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="13" letter-spacing="1.4">OAUTH-PROTECTED  ·  HOST-LOCAL WORK  ·  PRIVATE SSH BRIDGE</text>
+</svg>

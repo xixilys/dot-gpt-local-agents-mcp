@@ -2,11 +2,13 @@
 
 ## Trust boundary
 
-Dot GPT Local Agents MCP is intended for one trusted user, with Paseo and the gateway on the same Mac. Authorizing an OAuth client grants meaningful local agent read/write authority. It is not suitable as a shared public service for untrusted tenants.
+Dot GPT Local Agents MCP is intended for one trusted user, with one Mac gateway and explicitly configured local/SSH hosts. Authorizing an OAuth client grants meaningful agent and configured Direct Workspace authority on those hosts. It is not suitable as a shared public service for untrusted tenants.
 
-`allowedRoots` resolves real paths and rejects out-of-scope targets and symlink escapes. It is a gateway path check, not an OS sandbox: an agent can execute commands using its own runtime permissions. Generic agent reads, cancellation, updates and permission responses use the shared allowed-root authority domain. Client ownership additionally isolates collaboration request records, messages, subscriptions and reply claims, not every agent operation.
+`allowedRoots` resolves real paths and rejects out-of-scope targets and symlink escapes. It is a gateway path check, not an OS sandbox: an agent can execute commands using its own runtime permissions. Generic agent reads, cancellation, updates and permission responses use the shared allowed-root authority domain. Client ownership additionally isolates collaboration request records, messages, subscriptions, reply claims and Direct command receipts, not every agent or project-file operation. Direct projects are owner-configured per host, with separate read/write permissions and disabled/registered/full command modes. Registered commands match exact argv; full commands execute with the gateway account's system access and can act outside the initial project directory. Do not treat project roots as command containment. File writes use optimistic hashes and atomic replacement, not a kernel compare-and-swap against unrelated writers.
 
 Only proxy the OAuth-protected gateway, bound to `127.0.0.1:6768`. Keep Paseo's unauthenticated loopback agent endpoint private. Exposing the upstream would bypass the gateway's authentication and path policy. Use HTTPS and request/rate limits at your proxy, protect the owner password, and grant client consent only intentionally. This gateway has no built-in multi-tenant quotas or comprehensive abuse protection.
+
+Remote agents use the existing owner-configured OpenSSH target and pinned Paseo identity. Direct file/command access uses SSH independently of Paseo availability. The private reverse message socket grants only per-agent capabilities; no public agent-message ingress is added. Keep each host's state directory separate and do not copy old receipts to another host identity. Only gateway-owned command process groups are stopped by cancellation or close; gateway restart does not promise process continuity, and uncertain requests/inputs are not replayed.
 
 ## Private data
 
@@ -24,9 +26,9 @@ Delivery is not task acceptance. Preserve event/message/request IDs and deduplic
 
 Do not attach private configs, state files, tokens, sessions or callback URLs to a public issue. Use the repository's private vulnerability reporting feature when available. Otherwise open an issue with a non-sensitive summary to request a private reporting channel. Include a minimal synthetic reproduction and affected version.
 
-## Known dependency advisories in 0.3.0
+## Dependency audit retained from 0.3.0
 
-The public snapshot updates the directly used AJV to 8.20.0 and declares Zod explicitly. The separately installed DevSpace package also includes provider branches unused by this gateway: `sandbox-runtime → node-forge` and `pi-coding-agent → undici / brace-expansion / protobufjs`. npm audit reports advisories for those packages and their parents. A patched Forge release was not available during this release audit; the other branch versions remain the upstream package's locked versions.
+The public snapshot updates the directly used AJV to 8.20.0 and declares Zod explicitly. The separately installed DevSpace package also includes provider branches unused by this gateway: `sandbox-runtime → node-forge` and `pi-coding-agent → undici / brace-expansion / protobufjs`. npm audit reports advisories for those packages and their parents. At the 0.3.0 audit, a patched Forge release was not available; the other branch versions remain the upstream package's locked versions.
 
 The gateway imports only DevSpace's OAuth provider/store/database modules. The affected provider branches are outside that import graph and are not started here. This limits the identified exposure; it is not proof that the entire dependency tree is vulnerability-free, nor a security endorsement for using those provider modules separately. Do not extend the gateway to import/run them without first resolving and reviewing their advisories. We retain the tested authentication implementation rather than introducing a fork or unverified vendor rewrite solely to suppress audit output.
 

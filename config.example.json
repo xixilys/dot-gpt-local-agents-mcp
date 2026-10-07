@@ -7,5 +7,57 @@
   "paseoCommand": "/absolute/path/to/paseo",
   "allowedRoots": [
     "/absolute/path/to/allowed/project"
-  ]
+  ],
+  "hosts": [
+    {
+      "id": "wsl",
+      "name": "WSL",
+      "transport": "ssh",
+      "target": "ssh://linux-host",
+      "allowedRoots": [
+        "/home/you/project"
+      ],
+      "remoteStateDir": "/home/you/.local/share/local-agents-mcp-bridge/gateway",
+      "direct": {
+        "projects": [
+          {
+            "id": "remote-project",
+            "name": "Remote project",
+            "path": "/home/you/project",
+            "read": true,
+            "write": false,
+            "commandMode": "registered",
+            "commands": [
+              {
+                "name": "working-directory",
+                "argv": [
+                  "pwd"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "direct": {
+    "projects": [
+      {
+        "id": "local-project",
+        "name": "Local project",
+        "path": "/absolute/path/to/allowed/project",
+        "read": true,
+        "write": false,
+        "commandMode": "registered",
+        "commands": [
+          {
+            "name": "working-directory",
+            "argv": [
+              "pwd"
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

@@ -21,6 +21,11 @@ import { createAgentChannel } from './agent-channel.js';
 import { ObserverClient } from './observer-client.js';
 import { createModernHandler, isModernRequest } from './protocol-server.js';
 import { createRequestDiagnostics } from './request-diagnostics.js';
+import { configuredHosts, pinHost } from './hosts.js';
+import { HostRouter } from './host-router.js';
+import { DirectFiles } from './direct-files.js';
+import { DirectCommands } from './direct-commands.js';
+import { createRemoteHostAdapter } from './host-transport.js';
 
 export const SCOPE = 'local-agents';
 
@@ -60,11 +65,13 @@ export async function loadConfig(filename = fileURLToPath(new URL('../config.jso
   if (config.port !== 6768) throw new Error('Gateway port must be 6768');
   for (const field of ['stateDir', 'ownerTokenFile', 'paseoCommand']) if (!isAbsolute(config[field] ?? '')) throw new Error(`${field} must be an absolute path`);
   if (!Array.isArray(config.allowedRoots) || !config.allowedRoots.length || config.allowedRoots.some(root => !isAbsolute(root))) throw new Error('allowedRoots must contain absolute directory paths');
+  configuredHosts(config);
   return config;
 }
 
 export async function createGatewayApp(config, { upstream = new PaseoUpstream(config.upstreamUrl), oauthProvider,
-  callbackClient, observerFactory = options => new ObserverClient(options) } = {}) {
+  callbackClient, observerFactory = options => new ObserverClient(options),
+  hostAdapterFactory = createRemoteHostAdapter } = {}) {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await chmod(config.stateDir, 0o700);
   const resource = new URL('/mcp', config.publicBaseUrl);
@@ -78,44 +85,72 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
       accessTokenTtlSeconds: 3600, refreshTokenTtlSeconds: 30 * 24 * 3600,
     }, resource, config.stateDir);
   }
-  const store = new DispatchStore(config.stateDir);
-  const gateway = new Gateway({ upstream, store, config });
-  const eventStore = new EventStore(config.stateDir);
-  const collaborationStore = new CollaborationStore(config.stateDir);
-  let collaboration;
-  const delivery = new EventDelivery({ store: eventStore, ...(callbackClient ? { callbackClient } : {}),
-    authorizeSubscription: async (_name, args, _owner) => {
-      try { await collaboration.workspace(args.workspaceId); return true; }
-      catch (error) {
-        if (/outside allowedRoots|not an active/.test(error.message)) return false;
-        throw error;
-      }
-    } });
-  collaboration = new Collaboration({ store: collaborationStore, delivery, eventStore, gateway });
-  const channel = createAgentChannel({ stateDir: config.stateDir,
-    verifyAgent: (agentId, body) => collaboration.verifyMessage(agentId, body),
-    onMessage: body => collaboration.acceptMessage(body) });
-  const observer = observerFactory({
-    onEvent: event => { void collaboration.onObserverEvent(event).catch(() => {}); },
-    onStatus: status => {
-      if (status.status === 'ready') {
-        for (const id of status.agentIds ?? []) void collaboration.reconcile(id).catch(() => {});
-      }
-    },
-  });
-  collaboration.setChannel(channel);
-  collaboration.setObserver(observer);
-  gateway.collaboration = collaboration;
-  provider.onClientRevoked = clientId => delivery.revokeOwner(`local-owner:${clientId}`);
-  try { await gateway.refreshTools(); }
-  catch (error) { store.close(); provider.close(); throw error; }
+  const contexts = [];
+  const closeContext = async context => {
+    await context.directFiles?.close();
+    await context.directCommands?.close();
+    await context.channel.close();
+    await context.collaboration.close();
+    await context.delivery.stop();
+    context.eventStore.close(); context.store.close();
+    await context.adapter?.close();
+  };
+  try {
+    for (const host of configuredHosts(config)) {
+      await pinHost(host);
+      const adapter = host.transport === 'ssh' ? await hostAdapterFactory(host, { stateDir: host.stateDir }) : undefined;
+      const contextConfig = { ...config, stateDir: host.stateDir, allowedRoots: host.allowedRoots };
+      const store = new DispatchStore(host.stateDir);
+      const childGateway = new Gateway({ upstream: adapter?.upstream ?? upstream, store, config: contextConfig,
+        ...(adapter ? { paths: adapter.paths, readDaemon: adapter.readDaemon, readTimeline: adapter.readTimeline } : {}) });
+      const eventStore = new EventStore(host.stateDir);
+      const collaborationStore = new CollaborationStore(host.stateDir);
+      let collaboration;
+      const delivery = new EventDelivery({ store: eventStore, ...(callbackClient ? { callbackClient } : {}),
+        authorizeSubscription: async (_name, args, _owner) => {
+          try { await collaboration.workspace(args.workspaceId); return true; }
+          catch (error) {
+            if (/outside allowedRoots|not an active/.test(error?.message ?? '')) return false;
+            throw error;
+          }
+        } });
+      collaboration = new Collaboration({ store: collaborationStore, delivery, eventStore, gateway: childGateway, hostId: host.id });
+      const channelOptions = { stateDir: host.stateDir,
+        verifyAgent: (agentId, body) => collaboration.verifyMessage(agentId, body),
+        onMessage: body => collaboration.acceptMessage(body) };
+      const channel = adapter ? adapter.channelFactory(channelOptions) : createAgentChannel(channelOptions);
+      const observerOptions = {
+        onEvent: event => { void collaboration.onObserverEvent(event).catch(() => {}); },
+        onStatus: status => {
+          if (status.status === 'ready') {
+            void collaboration.recoverMessageChannels().catch(() => {});
+            for (const id of status.agentIds ?? []) void collaboration.reconcile(id).catch(() => {});
+          }
+        },
+      };
+      const observer = adapter ? adapter.observerFactory(observerOptions) : observerFactory(observerOptions);
+      collaboration.setChannel(channel); collaboration.setObserver(observer);
+      childGateway.collaboration = collaboration;
+      const context = { host, adapter, store, gateway: childGateway, collaboration, channel, observer, eventStore, delivery };
+      contexts.push(context);
+      context.directFiles = new DirectFiles({ host });
+      context.directCommands = new DirectCommands({ host, stateDir: host.stateDir });
+      await channel.listen();
+    }
+  } catch (error) {
+    await Promise.allSettled(contexts.map(closeContext)); provider.close(); throw error;
+  }
+  const gateway = new HostRouter(contexts);
+  const { collaboration, eventStore, delivery } = gateway.default;
+  provider.onClientRevoked = clientId => gateway.revokeOwner(`local-owner:${clientId}`);
+  await gateway.refreshTools();
   const app = createMcpExpressApp({ host: '127.0.0.1', allowedHosts: ['127.0.0.1', 'localhost', new URL(config.publicBaseUrl).hostname] });
   app.disable('x-powered-by');
   app.use(mcpAuthRouter({ provider, issuerUrl: new URL(config.publicBaseUrl), resourceServerUrl: resource, scopesSupported: [SCOPE], resourceName: 'Local Agents' }));
-  app.get('/healthz', (_req, res) => res.json({ ok: true, name: 'local-agents-mcp', version: '0.3.0' }));
+  app.get('/healthz', (_req, res) => res.json({ ok: true, name: 'local-agents-mcp', version: '0.4.0' }));
   const metadata = getOAuthProtectedResourceMetadataUrl(resource);
-  const modern = createModernHandler({ gateway, eventService: collaboration,
-    serverInfo: { name: 'local-agents-mcp', version: '0.3.0' } });
+  const modern = createModernHandler({ gateway, eventService: gateway,
+    serverInfo: { name: 'local-agents-mcp', version: '0.4.0' } });
   app.all('/mcp', requireBearerAuth({ verifier: provider, requiredScopes: [SCOPE], resourceMetadataUrl: metadata }), async (req, res) => {
     // Check the intended resource on every request, not just token issuance.
     if (req.auth?.resource?.href !== resource.href) {
@@ -128,7 +163,7 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
     req.mcpOwner = `local-owner:${req.auth.clientId}`;
     if (isModernRequest(req)) { await modern(req, res, req.body); return; }
     const observation = createRequestDiagnostics(req, res, { gateway });
-    const server = new Server({ name: 'local-agents-mcp', version: '0.3.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'local-agents-mcp', version: '0.4.0' }, { capabilities: { tools: {} } });
     server.onerror = error => observation.report('protocol', error);
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       try { return { tools: await gateway.refreshTools() }; }
@@ -155,29 +190,30 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
   app.use((_error, _req, res, _next) => {
     if (!res.headersSent) res.status(400).json({ error: 'Invalid request' });
   });
-  await channel.listen();
-  delivery.start();
-  // This process owns the channel and collector only. Other Paseo agents are untouched.
-  void collaboration.start().catch(() => {});
+  for (const context of contexts) {
+    context.delivery.start();
+    // Only owned collectors/channels are started; agent and daemon lifecycle is
+    // independent. A remote offline during recovery never stops the Mac context.
+    void context.collaboration.start().catch(() => {});
+  }
   let closed;
-  return { app, gateway, provider, collaboration, eventStore, delivery,
+  return { app, gateway, provider, collaboration, eventStore, delivery, hosts: gateway.contexts,
     close() {
       if (!closed) closed = (async () => {
         await modern.close();
-        await channel.close();
-        await collaboration.close();
-        await delivery.stop();
-        eventStore.close(); store.close(); provider.close();
+        await Promise.allSettled(contexts.map(closeContext));
+        provider.close();
       })();
       return closed;
     } };
+
 }
 
 async function main() {
   const config = await loadConfig(process.argv[2]);
   const runtime = await createGatewayApp(config);
   const listener = runtime.app.listen(config.port, '127.0.0.1', () => {
-    console.log(JSON.stringify({ event: 'gateway_listening', host: '127.0.0.1', port: config.port, version: '0.3.0' }));
+    console.log(JSON.stringify({ event: 'gateway_listening', host: '127.0.0.1', port: config.port, version: '0.4.0' }));
   });
   let stopping = false;
   function stop() {

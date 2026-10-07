@@ -78,18 +78,28 @@ export class PathPolicy {
 }
 
 export class Gateway {
-  constructor({ upstream, store, config, runCli = execFile, collaboration }) {
+  constructor({ upstream, store, config, runCli = execFile, collaboration, paths, readDaemon, readTimeline }) {
     this.upstream = upstream;
     this.store = store;
     this.config = config;
     this.runCli = runCli;
-    this.paths = new PathPolicy(config.allowedRoots);
+    this.paths = paths ?? new PathPolicy(config.allowedRoots);
+    if (readDaemon) this.readDaemon = readDaemon;
+    this.readTimeline = readTimeline;
     this.ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
     this.catalog = new Map();
     this.collaboration = collaboration;
   }
-  async refreshTools() {
-    const upstreamTools = await this.upstream.tools();
+  async refreshTools({ allowOffline = false } = {}) {
+    let upstreamTools;
+    try { upstreamTools = await this.upstream.tools(); this.upstreamAvailable = true; }
+    catch (error) {
+      this.upstreamAvailable = false;
+      if (!allowOffline) throw error;
+      // Keep only this host's last verified upstream definitions. Server-owned
+      // receipt tools can still recover an uncertain dispatch while it is offline.
+      upstreamTools = [...this.catalog.values()].map(entry => entry.tool).filter(tool => PUBLIC_TOOLS.has(tool.name));
+    }
     if (!Array.isArray(upstreamTools)) throw new Error('Invalid upstream tool catalog');
     const catalog = new Map();
     for (const original of upstreamTools) {
@@ -193,12 +203,14 @@ export class Gateway {
     }
     return result;
   }
-  async checkAgent(agentId, timeoutMs) {
+  async checkAgent(agentId, timeoutMs, { signal } = {}) {
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
     if (typeof agentId !== 'string' || !agentId.length) throw new Error('An agentId is required');
-    const result = await this.upstream.call('get_agent_status', { agentId }, timeoutMs === undefined ? undefined : { timeoutMs });
+    const result = await this.upstream.call('get_agent_status', { agentId }, timeoutMs === undefined ? undefined : { timeoutMs, signal });
     const snapshot = result.structuredContent?.snapshot;
     if (result.isError || !snapshot || snapshot.id !== agentId) throw new Error('Cannot verify agent identity and working directory from Paseo; use the complete agentId');
-    await this.paths.check(snapshot.cwd);
+    if (deadline !== undefined && Date.now() >= deadline) throw new Error('Agent check budget exhausted');
+    await this.paths.check(snapshot.cwd, { ...(deadline === undefined ? {} : { timeoutMs: Math.max(1, deadline - Date.now()) }), signal });
     return result;
   }
   async dispatch(name, args, owner, lockedRequest = false, lockedReply = false) {
@@ -317,22 +329,34 @@ export class Gateway {
       .some(s => s.id === r.subscriptionId));
     return { automaticWakeSupported: active, notificationMode: active ? 'subscribed_events' : 'explicit_read' };
   }
-  async timeline({ agentId, limit = 50, direction = 'tail', cursor }) {
+  async timeline({ agentId, limit = 50, direction = 'tail', cursor, timeoutMs = 30000, signal }) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Invalid timeline read budget');
+    const deadline = Date.now() + timeoutMs;
+    const remaining = () => {
+      signal?.throwIfAborted();
+      const value = deadline - Date.now();
+      if (value < 1) throw new Error('Timeline read budget exhausted');
+      return value;
+    };
     if (direction !== 'tail' && !cursor) throw new Error('before/after timeline reads require a cursor');
     if (direction === 'tail' && cursor) throw new Error('tail reads must omit cursor');
     let stdout;
     try {
-      ({ stdout } = await this.runCli(ELECTRON_HELPER,
-        [TIMELINE_READER, JSON.stringify({ agentId, limit, direction, ...(cursor ? { cursor } : {}) })],
-        { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8', env: {
+      if (this.readTimeline) stdout = JSON.stringify(await this.readTimeline({ agentId, limit, direction, ...(cursor ? { cursor } : {}) }, { timeoutMs: remaining(), signal }));
+      else ({ stdout } = await this.runCli(ELECTRON_HELPER,
+        [TIMELINE_READER, JSON.stringify({ agentId, limit, direction, ...(cursor ? { cursor } : {}), timeoutMs: remaining() })],
+        { timeout: remaining(), killSignal: 'SIGKILL', signal, maxBuffer: 1024 * 1024, encoding: 'utf8', env: {
           HOME: process.env.HOME, PATH: '/usr/bin:/bin', ELECTRON_RUN_AS_NODE: '1', PASEO_NODE_ENV: 'production',
         } }));
     } catch {
       throw new Error('Timeline read failed, timed out, or exceeded the 1 MiB output limit; reduce limit and retry this read');
     }
+    remaining();
+    if (Buffer.byteLength(stdout) > 1024 * 1024) throw new Error('Timeline output exceeds the 1 MiB output limit');
     const timeline = JSON.parse(stdout);
     if (timeline.error || !Array.isArray(timeline.entries) || timeline.agentId !== agentId) throw new Error('Paseo timeline read returned an error or invalid result');
-    if (timeline.agent) await this.paths.check(timeline.agent.cwd);
+    if (timeline.agent) await this.paths.check(timeline.agent.cwd, { timeoutMs: remaining(), signal });
+    remaining();
     return {
       ...timeline, fetchedAt: new Date().toISOString(), requestedLimit: limit,
       source: 'paseo-daemon-projected-timeline', fullRawEventStream: false,

@@ -3,19 +3,23 @@ import { randomUUID } from 'node:crypto';
 export const UPSTREAM_URL = 'http://127.0.0.1:6767/mcp/agents';
 
 export class PaseoUpstream {
-  constructor(url = UPSTREAM_URL, { fetchImpl = fetch, timeoutMs = 30_000 } = {}) {
-    if (url !== UPSTREAM_URL) throw new Error('The Paseo upstream must be the fixed local endpoint');
+  constructor(url = UPSTREAM_URL, { fetchImpl = fetch, timeoutMs = 30_000, ownedLoopback = false } = {}) {
+    // Alternate ports are reserved for a gateway-created SSH forward. Public
+    // calls never select this URL; redirects remain disabled for every request.
+    if (url !== UPSTREAM_URL && !(ownedLoopback && /^http:\/\/127\.0\.0\.1:(\d{1,5})\/mcp\/agents$/.test(url)
+      && Number(new URL(url).port) >= 1 && Number(new URL(url).port) <= 65535)) throw new Error('The Paseo upstream must be the fixed local endpoint or an owned loopback forward');
+    this.url = url;
     this.fetch = fetchImpl;
     this.timeoutMs = timeoutMs;
   }
 
-  async request(method, params, { timeoutMs = this.timeoutMs } = {}) {
+  async request(method, params, { timeoutMs = this.timeoutMs, signal } = {}) {
     const id = randomUUID();
-    const response = await this.fetch(UPSTREAM_URL, {
+    const response = await this.fetch(this.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
       body: JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
     if (!response.ok) throw new Error('Paseo upstream HTTP failure');

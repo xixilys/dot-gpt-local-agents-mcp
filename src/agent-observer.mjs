@@ -1,6 +1,7 @@
 // Owned, read-only collector. Only the gateway parent may control its watch set.
 // The official installed client owns transport/auth; no session files are read here.
 import { StringDecoder } from 'node:string_decoder';
+import { nativeTarget, checkNativeIdentity } from './ssh-bridge.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -96,6 +97,7 @@ async function pumpHistory() {
 }
 async function watch(agentIds) {
   const ids = new Set(agentIds.map(id => id.toLowerCase()));
+  if (version && ids.size === subscriptions.size && [...ids].every(id => subscriptions.has(id))) return;
   const watchVersion = ++version;
   for (const [id, sub] of subscriptions) if (!ids.has(id)) {
     subscriptions.delete(id); cursors.delete(id); historyQueue.delete(id); await sub.release();
@@ -144,8 +146,12 @@ function command(line) {
   void applyWatch();
 }
 try {
+  const transport = process.argv[2] ? JSON.parse(process.argv[2]) : undefined;
+  const target = nativeTarget(transport);
   const { connectToDaemon } = await import('/Applications/Paseo.app/Contents/Resources/app.asar/node_modules/@getpaseo/cli/dist/utils/client.js');
-  client = await connectToDaemon({ target: { kind: 'endpoint', host: '127.0.0.1:6767' }, timeout: 5000 });
+  delete process.env.PASEO_PASSWORD;
+  client = await connectToDaemon({ target, timeout: 5000 });
+  await checkNativeIdentity(client, transport);
   client.subscribeConnectionStatus(state => {
     const status = state.status === 'connected' ? 'connected' : 'disconnected';
     emit({ type: 'connection-status', status });
