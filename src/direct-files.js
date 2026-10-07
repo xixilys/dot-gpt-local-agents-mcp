@@ -49,6 +49,11 @@ export class DirectFiles {
     }
   }
   tools() { return DIRECT_FILE_TOOLS; }
+  withWriteLock(execute) {
+    const task = this.#writeTail.then(execute);
+    this.#writeTail = task.catch(() => {});
+    return task;
+  }
   async call(name, args, { owner } = {}) {
     try { assertOwner(owner); } catch { return errorResult('owner_required', 'Authenticated Direct owner is required.'); }
     if (this.#closed) return errorResult('direct_files_closed', 'Direct file access is closed.');
@@ -72,9 +77,7 @@ export class DirectFiles {
     if (!writing) return execute();
     // Serialize all writes for this host instance. Path or inode keys can miss
     // case/Unicode aliases, overlapping projects, or an inode replaced by rename.
-    const task = this.#writeTail.then(execute);
-    this.#writeTail = task.catch(() => {});
-    return task;
+    return this.withWriteLock(execute);
   }
   close() { this.#closed = true; this.#runner?.close(); }
 }

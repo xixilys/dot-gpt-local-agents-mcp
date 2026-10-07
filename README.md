@@ -135,6 +135,22 @@ Commands can stay disabled, use `commandMode: "registered"` with owner-configure
 
 Command requests are durable and keyed by `requestId`: rereading a request returns its recorded state and does not run it again. Interactive stdin writes use a deduplicated `inputId`; output reads are bounded and paginated by cursor. If the gateway restarts while a process is active, its record may become `interrupted` or `unknown`; the gateway does not promise to resume that process. Direct Workspace availability is independent of Paseo daemon health.
 
+## Direct binary files
+
+Direct binary transfers move file bytes between a project and the gateway without putting them into model text or base64, or routing them through Drive or Git. Local and SSH/WSL transfers use the fixed streaming path. Every call selects a `hostId`; export and import also name a `projectId`. Export uses the project's existing read permission, and import its write permission.
+
+| Tool | Use |
+| --- | --- |
+| `export_direct_file` | Pass `hostId`, `projectId`, `path`, and a stable `requestId`. The gateway creates an immutable snapshot and returns byte count, SHA-256, and a single-file HTTPS link on its existing MCP domain. Files are limited to 256 MiB; live snapshots share a 512 MiB cap and expire after 10 minutes. |
+| `import_direct_file` | Pass `hostId`, `projectId`, destination `path`, `expectedSha256`, and the caller-authorized file input. New files use `expectedSha256: null`; overwrites require the destination's current hash. The gateway downloads to a private spool and atomically writes the file on the selected host. |
+| `get_direct_transfer` | Read the recorded result using the original `hostId` and `requestId`. Known completed/failed receipts have a 24-hour recovery window; do not reuse their keys for new work. Unknown/interrupted tombstones remain, including across restart, and are never automatically retried; the bounded receipt store rejects new transfers when full. |
+
+For ChatGPT file input, `import_direct_file` accepts the documented `_meta["openai/fileParams"]` file object: `download_url` and `file_id` are required, while `mime_type` and `file_name` are optional. See [OpenAI's file input reference](https://developers.openai.com/plugins/reference). The gateway fetches only public HTTPS URLs.
+
+An export link is a short-lived bearer capability for that one file: anyone who obtains it can download the snapshot until it expires. Do not publish or log it. Revoking the OAuth owner also revokes that owner's active download tickets. The HTTP download itself does not re-authenticate or prove the identity of the OAuth client that received the link. After a gateway restart, old download tickets are invalid and pending transfer receipts become `interrupted`; use the original `requestId` to inspect the recorded state.
+
+**A returned `resource_link` or URL does not prove the receiving client downloaded the file.** Delivery is complete only after the recipient actually downloads and saves the bytes, checks the reported byte count and SHA-256, and loads the file where it will be used. Some cloud clients may not be able to fetch the HTTPS link directly; in that environment this path has a materialization gap. Do not substitute Drive or Git and describe it as the same native transfer.
+
 ## Events and agent messages
 
 The legacy tools transport and the `2026-07-28` MCP Events adapter share `/mcp`. For an Events-capable client, subscribe to `agent.attention` with explicit `hostId`, `workspaceId`, and a stable `routeId` unique to that chat, plus its HTTPS callback and signing secret. Confirm the route with `list_notification_routes`, then bind it to dispatches. Existing requests can be watched with their original request ID and an explicit route; this does not create an agent, send a prompt, or rebind another route. A subscription, route binding, `notifyOnFinish`, or successful callback delivery report does not prove that a client woke up or that its task succeeded. Without Events support, read or wait for results directly.

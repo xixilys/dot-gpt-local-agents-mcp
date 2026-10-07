@@ -70,7 +70,7 @@ export class HostRouter {
       }
     }
     for (const context of contexts) {
-      for (const direct of [context.directFiles, context.directCommands]) {
+      for (const direct of [context.directFiles, context.directCommands, context.directTransfers]) {
         for (const tool of direct?.tools() ?? []) {
           const collected = definitions.get(tool.name) ?? [];
           collected.push(tool); definitions.set(tool.name, collected);
@@ -122,14 +122,20 @@ export class HostRouter {
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object');
     const { hostId = DEFAULT_HOST_ID, ...businessArgs } = args;
     const context = this.context(hostId);
-    if (name === listDirectProjects.name || context.directFiles?.tools().some(tool => tool.name === name)
-      || context.directCommands?.tools().some(tool => tool.name === name)) {
+    const directService = [context.directFiles, context.directCommands, context.directTransfers]
+      .find(service => service?.tools().some(tool => tool.name === name));
+    if (name === listDirectProjects.name || directService) {
       assertOwner(options.owner);
       if (!this.catalog.get(name)?.validate(args)) throw new Error('Invalid Direct tool arguments');
       if (name === listDirectProjects.name) return attributed(jsonResult({ projects: directProjects(context.host) }), hostId);
-      const service = context.directFiles.tools().some(tool => tool.name === name) ? context.directFiles : context.directCommands;
-      const value = await service.call(name, businessArgs, options);
-      return attributed({ ...jsonResult(value), ...(value?.ok === false ? { isError: true } : {}) }, hostId);
+      const value = await directService.call(name, businessArgs, options);
+      const result = jsonResult(value);
+      if (value?.ok === true && value.direction === 'export' && value.state === 'ready' && value.downloadUrl) {
+        result.content.push({ type: 'resource_link', uri: value.downloadUrl, name: value.fileName,
+          mimeType: value.mimeType, size: value.bytes,
+          description: 'Temporary download of the requested file snapshot. Download the bytes before expiry; a link alone does not confirm delivery.' });
+      }
+      return attributed({ ...result, ...(value?.ok === false ? { isError: true } : {}) }, hostId);
     }
     // Receipt/message routing never discovers a host from an untrusted agent ID,
     // label, callback payload or request header, even when IDs collide.
@@ -171,6 +177,7 @@ export class HostRouter {
     return routed.context.collaboration.unsubscribe(owner, routed.params);
   }
   revokeOwner(owner) {
-    return Promise.all([...this.contexts.values()].map(context => context.delivery.revokeOwner(owner)));
+    return Promise.all([...this.contexts.values()].flatMap(context => [context.delivery.revokeOwner(owner),
+      context.directTransfers?.revokeOwner(owner)]));
   }
 }

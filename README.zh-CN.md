@@ -135,6 +135,22 @@ Direct Workspace 在现有 Node.js 网关中增加按项目授权的文件与命
 
 命令请求以 `requestId` 持久记录：再次读取会返回原记录，不会重新运行。交互式 stdin 写入使用可去重的 `inputId`；命令输出有界，并通过 cursor 分页。若网关在进程运行期间重启，请求记录可能变为 `interrupted` 或 `unknown`；网关不承诺恢复该进程。Direct Workspace 的可用性独立于 Paseo daemon 健康状态。
 
+## Direct binary files
+
+Direct binary transfer 在项目与网关之间传输原始文件字节，不把内容放进模型文本或 base64，也不经由 Drive 或 Git。本机与 SSH/WSL 使用固定的流式传输路径。每次调用都选择 `hostId`；导出和导入还会指定 `projectId`。导出沿用项目已有的读取权限，导入沿用写入权限。
+
+| 工具 | 用途 |
+| --- | --- |
+| `export_direct_file` | 传入 `hostId`、`projectId`、`path` 和稳定的 `requestId`。网关生成不可变快照，并返回字节数、SHA-256，以及现有 MCP 域名下的单文件 HTTPS 链接。单文件上限 256 MiB；有效快照总量上限 512 MiB，10 分钟后过期。 |
+| `import_direct_file` | 传入 `hostId`、`projectId`、目标 `path`、`expectedSha256` 和由调用者授权的文件输入。新建文件使用 `expectedSha256: null`；覆盖已有文件须提供目标当前 hash。网关先下载到私有 spool，再在选定主机上原子写入文件。 |
+| `get_direct_transfer` | 使用原始 `hostId` 和 `requestId` 读取已记录结果。已完成或确定失败的回执可恢复 24 小时，不要复用它们的 ID 开始新工作。未知或中断记录会保留，重启后也不自动重做；有界回执存储满时拒绝新传输。 |
+
+ChatGPT 文件输入遵循官方 `_meta["openai/fileParams"]` 格式：`download_url` 和 `file_id` 必填，`mime_type` 和 `file_name` 可选。详见 [OpenAI 文件输入参考](https://developers.openai.com/plugins/reference)。网关只从公网 HTTPS URL 拉取文件。
+
+导出链接是短期 bearer capability，只指向一个文件：在过期前，任何拿到链接的人都能下载快照。不要公开或写入日志。撤销 OAuth owner 时，也会撤销该 owner 尚有效的下载 ticket。HTTP 下载本身不会重新验证或证明收到链接的 OAuth client 身份。网关重启后，旧下载 ticket 会失效，未完成的传输回执会变为 `interrupted`；用原始 `requestId` 查询记录状态。
+
+**返回 `resource_link` 或 URL 不代表接收端已经下载文件。**只有接收端真正下载并保存字节、核对返回的字节数与 SHA-256，并在使用位置加载文件后，才算交付完成。有些云端客户端可能无法直接通过 HTTPS 获取该链接；此时这条路径存在实际落盘能力缺口。不要悄悄改用 Drive 或 Git 后仍称作同一种原生传输。
+
 ## 事件与 agent 消息
 
 旧 tools transport 和 `2026-07-28` MCP Events adapter 共用 `/mcp`。支持 Events 的客户端订阅 `agent.attention` 时，应显式传入 `hostId`、`workspaceId`，并为每个聊天使用稳定且唯一的 `routeId`，同时提供 HTTPS callback 和签名密钥。通过 `list_notification_routes` 确认路由后，再将它绑定到任务。已有请求可以用原始 request ID 和显式 route 添加 watch；这不会创建 agent、发送 prompt 或改绑到其他 route。订阅、route 绑定、`notifyOnFinish` 或成功的回调投递记录，都不能证明客户端已被唤醒或任务已成功。客户端不支持 Events 时，可直接读取或等待结果。

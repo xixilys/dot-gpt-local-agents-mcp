@@ -42,7 +42,7 @@ async function noSymlinks(absolute, { finalMissing = false } = {}) {
   return fs.lstat('/');
 }
 
-async function resolveProject(projectPath, roots) {
+export async function resolveProject(projectPath, roots) {
   if (typeof projectPath !== 'string' || !path.isAbsolute(projectPath) || projectPath.includes('\0') || !Array.isArray(roots) || !roots.length || roots.length > 128) {
     fail('invalid_project', 'The owner must configure an absolute Direct project and allowed roots.');
   }
@@ -58,7 +58,7 @@ async function resolveProject(projectPath, roots) {
   return project;
 }
 
-async function resolveTarget(project, relative, { allowEmpty = false, create = false } = {}) {
+export async function resolveTarget(project, relative, { allowEmpty = false, create = false } = {}) {
   const clean = relativePath(relative, allowEmpty);
   const target = path.resolve(project, clean);
   if (!inside(project, target)) fail('invalid_path', 'The path must remain inside the project.');
@@ -91,7 +91,7 @@ async function readText(target) {
   } finally { await handle.close(); }
 }
 
-const identityEqual = (a, b) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+export const identityEqual = (a, b) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
 function contentBytes(content) {
   const bytes = Buffer.from(content, 'utf8');
   if (content.includes('\0')) fail('not_text', 'Text content cannot contain NUL bytes.');

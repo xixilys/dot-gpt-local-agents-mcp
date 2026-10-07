@@ -25,6 +25,7 @@ import { configuredHosts, pinHost } from './hosts.js';
 import { HostRouter } from './host-router.js';
 import { DirectFiles } from './direct-files.js';
 import { DirectCommands } from './direct-commands.js';
+import { DirectTransfers } from './direct-transfers.js';
 import { createRemoteHostAdapter } from './host-transport.js';
 
 export const SCOPE = 'local-agents';
@@ -71,7 +72,7 @@ export async function loadConfig(filename = fileURLToPath(new URL('../config.jso
 
 export async function createGatewayApp(config, { upstream = new PaseoUpstream(config.upstreamUrl), oauthProvider,
   callbackClient, observerFactory = options => new ObserverClient(options),
-  hostAdapterFactory = createRemoteHostAdapter } = {}) {
+  hostAdapterFactory = createRemoteHostAdapter, fileDownloadClient, binaryTransportFactory } = {}) {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await chmod(config.stateDir, 0o700);
   const resource = new URL('/mcp', config.publicBaseUrl);
@@ -86,6 +87,7 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
     }, resource, config.stateDir);
   }
   const contexts = [];
+  let directTransfers;
   const closeContext = async context => {
     await context.directFiles?.close();
     await context.directCommands?.close();
@@ -137,8 +139,15 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
       context.directCommands = new DirectCommands({ host, stateDir: host.stateDir });
       await channel.listen();
     }
+    directTransfers = new DirectTransfers({ contexts, stateDir: config.stateDir, publicBaseUrl: config.publicBaseUrl,
+      ...(fileDownloadClient ? { downloadClient: fileDownloadClient } : {}),
+      ...(binaryTransportFactory ? { transportFactory: binaryTransportFactory } : {}) });
+    await directTransfers.ready();
+    for (const context of contexts) context.directTransfers = directTransfers.forHost(context.host.id);
   } catch (error) {
-    await Promise.allSettled(contexts.map(closeContext)); provider.close(); throw error;
+    await Promise.allSettled([Promise.resolve().then(() => directTransfers?.close()), ...contexts.map(closeContext)]);
+    try { provider.close(); } catch { /* Preserve the original initialization error. */ }
+    throw error;
   }
   const gateway = new HostRouter(contexts);
   const { collaboration, eventStore, delivery } = gateway.default;
@@ -146,11 +155,14 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
   await gateway.refreshTools();
   const app = createMcpExpressApp({ host: '127.0.0.1', allowedHosts: ['127.0.0.1', 'localhost', new URL(config.publicBaseUrl).hostname] });
   app.disable('x-powered-by');
+  app.route('/direct-files/:token/:filename')
+    .get((req, res) => directTransfers.handleDownload(req, res))
+    .head((req, res) => directTransfers.handleDownload(req, res));
   app.use(mcpAuthRouter({ provider, issuerUrl: new URL(config.publicBaseUrl), resourceServerUrl: resource, scopesSupported: [SCOPE], resourceName: 'Local Agents' }));
-  app.get('/healthz', (_req, res) => res.json({ ok: true, name: 'local-agents-mcp', version: '0.4.0' }));
+  app.get('/healthz', (_req, res) => res.json({ ok: true, name: 'local-agents-mcp', version: '0.5.0' }));
   const metadata = getOAuthProtectedResourceMetadataUrl(resource);
   const modern = createModernHandler({ gateway, eventService: gateway,
-    serverInfo: { name: 'local-agents-mcp', version: '0.4.0' } });
+    serverInfo: { name: 'local-agents-mcp', version: '0.5.0' } });
   app.all('/mcp', requireBearerAuth({ verifier: provider, requiredScopes: [SCOPE], resourceMetadataUrl: metadata }), async (req, res) => {
     // Check the intended resource on every request, not just token issuance.
     if (req.auth?.resource?.href !== resource.href) {
@@ -163,7 +175,7 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
     req.mcpOwner = `local-owner:${req.auth.clientId}`;
     if (isModernRequest(req)) { await modern(req, res, req.body); return; }
     const observation = createRequestDiagnostics(req, res, { gateway });
-    const server = new Server({ name: 'local-agents-mcp', version: '0.4.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'local-agents-mcp', version: '0.5.0' }, { capabilities: { tools: {} } });
     server.onerror = error => observation.report('protocol', error);
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       try { return { tools: await gateway.refreshTools() }; }
@@ -197,12 +209,14 @@ export async function createGatewayApp(config, { upstream = new PaseoUpstream(co
     void context.collaboration.start().catch(() => {});
   }
   let closed;
-  return { app, gateway, provider, collaboration, eventStore, delivery, hosts: gateway.contexts,
+  return { app, gateway, provider, collaboration, eventStore, delivery, directTransfers, hosts: gateway.contexts,
     close() {
       if (!closed) closed = (async () => {
-        await modern.close();
-        await Promise.allSettled(contexts.map(closeContext));
-        provider.close();
+        try { await modern.close(); }
+        finally {
+          try { await directTransfers.close(); }
+          finally { await Promise.allSettled(contexts.map(closeContext)); provider.close(); }
+        }
       })();
       return closed;
     } };
@@ -213,7 +227,7 @@ async function main() {
   const config = await loadConfig(process.argv[2]);
   const runtime = await createGatewayApp(config);
   const listener = runtime.app.listen(config.port, '127.0.0.1', () => {
-    console.log(JSON.stringify({ event: 'gateway_listening', host: '127.0.0.1', port: config.port, version: '0.4.0' }));
+    console.log(JSON.stringify({ event: 'gateway_listening', host: '127.0.0.1', port: config.port, version: '0.5.0' }));
   });
   let stopping = false;
   function stop() {
